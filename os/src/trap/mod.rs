@@ -145,11 +145,20 @@ pub fn trap_return() -> ! {
 /// Todo: Chapter 9: I/O device
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
+    let fault_addr = stval::read();
+    let pte = crate::mm::KERNEL_SPACE
+        .exclusive_access()
+        .translate(crate::mm::VirtAddr(fault_addr).floor());
+    let task = crate::task::current_task().unwrap();
     println!(
-        "[kernel] trap from kernel: scause = {:?}, stval = {:#x}, sepc = {:#x}, satp = {:#x}, kernel_satp = {:#x}, user_satp = {:#x}",
+        "[kernel] trap from kernel: scause = {:?}, stval = {:#x}, sepc = {:#x}, pte = {:?}, kstack = {}, kstack_top = {:#x}, pid = {}, satp = {:#x}, kernel_satp = {:#x}, user_satp = {:#x}",
         scause::read().cause(),
-        stval::read(),
+        fault_addr,
         sepc::read(),
+        pte.map(|entry| (entry.bits, entry.writable())),
+        task.kernel_stack.0,
+        task.kernel_stack.get_top(),
+        task.pid.0,
         riscv::register::satp::read().bits(),
         crate::mm::KERNEL_SPACE.exclusive_access().token(),
         crate::task::current_user_token()
