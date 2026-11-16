@@ -26,7 +26,7 @@ use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
-pub use manager::{fetch_task, TaskManager};
+pub use manager::{add_stopping_task, clear_stopping_task, fetch_task, TaskManager};
 use switch::__switch;
 pub use task::{TaskControlBlock, TaskStatus};
 
@@ -101,7 +101,7 @@ pub fn exit_current_and_run_next(exit_code: i32) {
     drop(inner);
     // **** release current PCB
     // drop task manually to maintain rc correctly
-    drop(task);
+    add_stopping_task(task);
     // we do not have to save task context
     let mut _unused = TaskContext::zero_init();
     schedule(&mut _unused as *mut _);
