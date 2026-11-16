@@ -71,6 +71,47 @@ lazy_static! {
 }
 
 impl TaskManager {
+    fn increase_current_syscall_count(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if syscall_id < inner.tasks[current].syscall_count.len() {
+            inner.tasks[current].syscall_count[syscall_id] += 1;
+        }
+    }
+
+    fn get_current_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .syscall_count
+            .get(syscall_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    fn map_current_user_area(
+        &self,
+        start: usize,
+        end: usize,
+        permission: crate::mm::MapPermission,
+    ) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current].memory_set.map_user_area(
+            crate::mm::VirtAddr(start),
+            crate::mm::VirtAddr(end),
+            permission,
+        )
+    }
+
+    fn unmap_current_user_area(&self, start: usize, end: usize) -> bool {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .unmap_user_area(crate::mm::VirtAddr(start), crate::mm::VirtAddr(end))
+    }
+
     /// Run the first task in task list.
     ///
     /// Generally, the first task in task list is an idle task (we call it zero process later).
@@ -201,4 +242,28 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// Record one syscall issued by the current task.
+pub fn increase_current_syscall_count(syscall_id: usize) {
+    TASK_MANAGER.increase_current_syscall_count(syscall_id);
+}
+
+/// Query how many syscalls with `syscall_id` the current task issued.
+pub fn get_current_syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_current_syscall_count(syscall_id)
+}
+
+/// Map a page-aligned user area in the current task's address space.
+pub fn map_current_user_area(
+    start: usize,
+    end: usize,
+    permission: crate::mm::MapPermission,
+) -> bool {
+    TASK_MANAGER.map_current_user_area(start, end, permission)
+}
+
+/// Unmap an exact page-aligned user area from the current task.
+pub fn unmap_current_user_area(start: usize, end: usize) -> bool {
+    TASK_MANAGER.unmap_current_user_area(start, end)
 }

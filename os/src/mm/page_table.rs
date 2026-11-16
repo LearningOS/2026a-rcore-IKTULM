@@ -157,6 +157,40 @@ impl PageTable {
     }
 }
 
+fn translated_ptr(token: usize, ptr: usize) -> Option<(*mut u8, usize)> {
+    let page_table = PageTable::from_token(token);
+    let start_va: VirtAddr = ptr.into();
+    let pte = page_table.translate(start_va.floor())?;
+    if !pte.is_valid() {
+        return None;
+    }
+    Some((pte.ppn().get_bytes_array().as_mut_ptr(), start_va.page_offset()))
+}
+
+/// Translate a readable user pointer into a shared reference.
+pub fn translated_ref<T>(token: usize, ptr: *const T) -> Option<&'static T> {
+    let page_table = PageTable::from_token(token);
+    let va: VirtAddr = (ptr as usize).into();
+    let pte = page_table.translate(va.floor())?;
+    if !pte.readable() || !pte.flags().contains(PTEFlags::U) {
+        return None;
+    }
+    let (base, offset) = translated_ptr(token, ptr as usize)?;
+    Some(unsafe { &*(base.add(offset) as *const T) })
+}
+
+/// Translate a writable user pointer into a mutable reference.
+pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> Option<&'static mut T> {
+    let page_table = PageTable::from_token(token);
+    let va: VirtAddr = (ptr as usize).into();
+    let pte = page_table.translate(va.floor())?;
+    if !pte.writable() || !pte.flags().contains(PTEFlags::U) {
+        return None;
+    }
+    let (base, offset) = translated_ptr(token, ptr as usize)?;
+    Some(unsafe { &mut *(base.add(offset) as *mut T) })
+}
+
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
 pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
     let page_table = PageTable::from_token(token);
