@@ -68,6 +68,12 @@ impl MemorySet {
             .enumerate()
             .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
         {
+            println!(
+                "[kernel] remove area start_vpn={} range={:?}..={:?}",
+                start_vpn.0,
+                area.vpn_range.get_start(),
+                area.vpn_range.get_end()
+            );
             area.unmap(&mut self.page_table);
             self.areas.remove(idx);
         }
