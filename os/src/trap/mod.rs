@@ -146,10 +146,13 @@ pub fn trap_return() -> ! {
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
     println!(
-        "[kernel] trap from kernel: scause = {:?}, stval = {:#x}, sepc = {:#x}",
+        "[kernel] trap from kernel: scause = {:?}, stval = {:#x}, sepc = {:#x}, satp = {:#x}, kernel_satp = {:#x}, user_satp = {:#x}",
         scause::read().cause(),
         stval::read(),
-        sepc::read()
+        sepc::read(),
+        riscv::register::satp::read().bits(),
+        crate::mm::KERNEL_SPACE.exclusive_access().token(),
+        crate::task::current_user_token()
     );
     panic!("a trap {:?} from kernel!", scause::read().cause());
 }
