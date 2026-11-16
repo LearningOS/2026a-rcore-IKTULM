@@ -265,6 +265,38 @@ impl MemorySet {
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
     }
+    /// Map a user area when it is aligned and does not overlap existing memory.
+    pub fn map_user_area(
+        &mut self,
+        start_va: VirtAddr,
+        end_va: VirtAddr,
+        permission: MapPermission,
+    ) -> bool {
+        if start_va >= end_va || !start_va.aligned() || !end_va.aligned() {
+            return false;
+        }
+        let area = MapArea::new(start_va, end_va, MapType::Framed, permission);
+        if self.areas.iter().any(|existing| existing.is_overlap(&area)) {
+            return false;
+        }
+        self.push(area, None);
+        true
+    }
+    /// Unmap exactly the requested aligned user area.
+    pub fn unmap_user_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) -> bool {
+        if start_va >= end_va || !start_va.aligned() || !end_va.aligned() {
+            return false;
+        }
+        let Some(index) = self.areas.iter().position(|area| {
+            area.vpn_range.get_start() == start_va.floor()
+                && area.vpn_range.get_end() == end_va.ceil()
+        }) else {
+            return false;
+        };
+        let mut area = self.areas.remove(index);
+        area.unmap(&mut self.page_table);
+        true
+    }
 
     ///Remove all `MapArea`
     pub fn recycle_data_pages(&mut self) {
@@ -332,6 +364,10 @@ impl MapArea {
             map_type: another.map_type,
             map_perm: another.map_perm,
         }
+    }
+    fn is_overlap(&self, other: &Self) -> bool {
+        self.vpn_range.get_start() < other.vpn_range.get_end()
+            && other.vpn_range.get_start() < self.vpn_range.get_end()
     }
     pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
         let ppn: PhysPageNum;

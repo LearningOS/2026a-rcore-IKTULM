@@ -68,6 +68,15 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// Virtual runtime used by the stride scheduler.
+    pub stride: usize,
+
+    /// Relative CPU share.
+    pub priority: usize,
+
+    /// Number of syscalls issued by this process.
+    pub syscall_count: [usize; 500],
 }
 
 impl TaskControlBlockInner {
@@ -118,6 +127,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    stride: 0,
+                    priority: 16,
+                    syscall_count: [0; 500],
                 })
             },
         };
@@ -150,6 +162,8 @@ impl TaskControlBlock {
         inner.trap_cx_ppn = trap_cx_ppn;
         // initialize base_size
         inner.base_size = user_sp;
+        inner.heap_bottom = user_sp;
+        inner.program_brk = user_sp;
         // initialize trap_cx
         let trap_cx = inner.get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
@@ -191,6 +205,9 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    stride: parent_inner.stride,
+                    priority: parent_inner.priority,
+                    syscall_count: [0; 500],
                 })
             },
         });
@@ -235,6 +252,12 @@ impl TaskControlBlock {
         } else {
             None
         }
+    }
+
+    /// Set the scheduling priority of this process.
+    pub fn set_priority(&self, priority: usize) -> isize {
+        self.inner_exclusive_access().priority = priority;
+        priority as isize
     }
 }
 
