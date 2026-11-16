@@ -145,7 +145,12 @@ pub fn trap_return() -> ! {
 /// Todo: Chapter 9: I/O device
 pub fn trap_from_kernel() -> ! {
     use riscv::register::sepc;
-    trace!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());
+    println!(
+        "[kernel] trap from kernel: scause = {:?}, stval = {:#x}, sepc = {:#x}",
+        scause::read().cause(),
+        stval::read(),
+        sepc::read()
+    );
     panic!("a trap {:?} from kernel!", scause::read().cause());
 }
 
