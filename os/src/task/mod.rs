@@ -54,6 +54,7 @@ lazy_static! {
         let mut tasks = [TaskControlBlock {
             task_cx: TaskContext::zero_init(),
             task_status: TaskStatus::UnInit,
+            syscall_count: [0; 500],
         }; MAX_APP_NUM];
         for (i, task) in tasks.iter_mut().enumerate() {
             task.task_cx = TaskContext::goto_restore(init_app_cx(i));
@@ -72,6 +73,29 @@ lazy_static! {
 }
 
 impl TaskManager {
+    fn current_task_is_user_addr(&self, addr: usize) -> bool {
+        let inner = self.inner.exclusive_access();
+        crate::loader::is_user_addr(inner.current_task, addr)
+    }
+
+    fn increase_syscall_count(&self, syscall_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        if syscall_id < inner.tasks[current].syscall_count.len() {
+            inner.tasks[current].syscall_count[syscall_id] += 1;
+        }
+    }
+
+    fn get_syscall_count(&self, syscall_id: usize) -> usize {
+        let inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .syscall_count
+            .get(syscall_id)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Run the first task in task list.
     ///
     /// Generally, the first task in task list is an idle task (we call it zero process later).
@@ -168,4 +192,19 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+/// Check whether an address belongs to the current task's user memory.
+pub fn current_task_is_user_addr(addr: usize) -> bool {
+    TASK_MANAGER.current_task_is_user_addr(addr)
+}
+
+/// Record one completed syscall for the current task.
+pub fn increase_syscall_count(syscall_id: usize) {
+    TASK_MANAGER.increase_syscall_count(syscall_id);
+}
+
+/// Return how many syscalls with `syscall_id` the current task completed.
+pub fn get_syscall_count(syscall_id: usize) -> usize {
+    TASK_MANAGER.get_syscall_count(syscall_id)
 }

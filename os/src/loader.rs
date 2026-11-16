@@ -48,6 +48,15 @@ impl UserStack {
     }
 }
 
+/// Check whether `addr` is in the selected application's code/data or user stack.
+pub fn is_user_addr(app_id: usize, addr: usize) -> bool {
+    let app_start = get_base_i(app_id);
+    let stack_start = USER_STACK[app_id].data.as_ptr() as usize;
+    let stack_end = stack_start + USER_STACK_SIZE;
+    (app_start..app_start + APP_SIZE_LIMIT).contains(&addr)
+        || (stack_start..stack_end).contains(&addr)
+}
+
 /// Get base address of app i.
 fn get_base_i(app_id: usize) -> usize {
     APP_BASE_ADDRESS + app_id * APP_SIZE_LIMIT
