@@ -46,6 +46,9 @@ pub fn suspend_current_and_run_next() {
     let task_cx_ptr = &mut task_inner.task_cx as *mut TaskContext;
     // Change status to Ready
     task_inner.task_status = TaskStatus::Ready;
+    task_inner.stride = task_inner
+        .stride
+        .saturating_add((u32::MAX as usize / task_inner.priority).max(1));
     drop(task_inner);
     // ---- release current PCB
 
@@ -119,4 +122,25 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     add_task(INITPROC.clone());
+}
+
+/// Record one syscall issued by the current process.
+pub fn increase_current_syscall_count(syscall_id: usize) {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if syscall_id < inner.syscall_count.len() {
+        inner.syscall_count[syscall_id] += 1;
+    }
+}
+
+/// Query how many syscalls with `syscall_id` the current process issued.
+pub fn get_current_syscall_count(syscall_id: usize) -> usize {
+    let task = current_task().unwrap();
+    let count = task
+        .inner_exclusive_access()
+        .syscall_count
+        .get(syscall_id)
+        .copied()
+        .unwrap_or(0);
+    count
 }

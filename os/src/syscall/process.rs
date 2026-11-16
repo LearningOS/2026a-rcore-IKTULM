@@ -4,11 +4,14 @@ use alloc::sync::Arc;
 
 use crate::{
     fs::{open_file, OpenFlags},
-    mm::{translated_refmut, translated_str},
+    mm::{
+        translated_ref, translated_refmut, translated_str, try_translated_refmut, MapPermission,
+    },
     task::{
         add_task, current_task, current_user_token, exit_current_and_run_next,
-        suspend_current_and_run_next,
+        get_current_syscall_count, suspend_current_and_run_next, TaskControlBlock,
     },
+    timer::get_time_us,
 };
 
 #[repr(C)]
@@ -105,30 +108,96 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
 /// YOUR JOB: get time with second and microsecond
 /// HINT: You might reimplement it with virtual memory management.
 /// HINT: What if [`TimeVal`] is splitted by two pages ?
-pub fn sys_get_time(_ts: *mut TimeVal, _tz: usize) -> isize {
+pub fn sys_get_time(ts: *mut TimeVal, _tz: usize) -> isize {
     trace!(
         "kernel:pid[{}] sys_get_time NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
-    -1
+    let token = current_user_token();
+    let us = get_time_us();
+    for (index, value) in [us / 1_000_000, us % 1_000_000].iter().enumerate() {
+        let ptr = (ts as usize + index * core::mem::size_of::<usize>()) as *mut usize;
+        let Some(slot) = try_translated_refmut(token, ptr) else {
+            return -1;
+        };
+        *slot = *value;
+    }
+    0
 }
 
-/// YOUR JOB: Implement mmap.
-pub fn sys_mmap(_start: usize, _len: usize, _port: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_mmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Map a user area with the requested permissions.
+pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
+    let task = current_task().unwrap();
+    if len == 0
+        || start % 4096 != 0
+        || prot == 0
+        || prot & !7 != 0
+        || len.checked_add(4095).is_none()
+    {
+        return -1;
+    }
+    let aligned_len = (len + 4095) / 4096 * 4096;
+    let Some(end) = start.checked_add(aligned_len) else {
+        return -1;
+    };
+    let mut permission = MapPermission::U;
+    if prot & 1 != 0 {
+        permission |= MapPermission::R;
+    }
+    if prot & 2 != 0 {
+        permission |= MapPermission::W;
+    }
+    if prot & 4 != 0 {
+        permission |= MapPermission::X;
+    }
+    if task.inner_exclusive_access().memory_set.map_user_area(
+        (start).into(),
+        (end).into(),
+        permission,
+    ) {
+        0
+    } else {
+        -1
+    }
 }
 
-/// YOUR JOB: Implement munmap.
-pub fn sys_munmap(_start: usize, _len: usize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_munmap NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Unmap an exact aligned user area.
+pub fn sys_munmap(start: usize, len: usize) -> isize {
+    let task = current_task().unwrap();
+    if len == 0 || start % 4096 != 0 || len % 4096 != 0 {
+        return -1;
+    }
+    let Some(end) = start.checked_add(len) else {
+        return -1;
+    };
+    if task
+        .inner_exclusive_access()
+        .memory_set
+        .unmap_user_area((start).into(), (end).into())
+    {
+        0
+    } else {
+        -1
+    }
+}
+
+/// Read/write a user byte, or query a syscall count.
+pub fn sys_trace(trace_request: usize, id: usize, data: usize) -> isize {
+    let token = current_user_token();
+    match trace_request {
+        0 => translated_ref(token, id as *const u8)
+            .map(|value| *value as isize)
+            .unwrap_or(-1),
+        1 => match try_translated_refmut(token, id as *mut u8) {
+            Some(value) => {
+                *value = data as u8;
+                0
+            }
+            None => -1,
+        },
+        2 => get_current_syscall_count(id) as isize,
+        _ => -1,
+    }
 }
 
 /// change data segment size
@@ -141,21 +210,30 @@ pub fn sys_sbrk(size: i32) -> isize {
     }
 }
 
-/// YOUR JOB: Implement spawn.
-/// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Create a process directly from a file containing an ELF image.
+pub fn sys_spawn(path: *const u8) -> isize {
+    let parent = current_task().unwrap();
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    let Some(inode) = open_file(path.as_str(), OpenFlags::RDONLY) else {
+        return -1;
+    };
+    let data = inode.read_all();
+    let child = Arc::new(TaskControlBlock::new(data.as_slice()));
+    let pid = child.getpid();
+    child.inner_exclusive_access().parent = Some(Arc::downgrade(&parent));
+    parent
+        .inner_exclusive_access()
+        .children
+        .push(child.clone());
+    add_task(child);
+    pid as isize
 }
 
-// YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+/// Set the current process priority.
+pub fn sys_set_priority(prio: isize) -> isize {
+    if prio <= 1 {
+        return -1;
+    }
+    current_task().unwrap().set_priority(prio as usize)
 }
