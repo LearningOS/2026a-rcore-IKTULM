@@ -76,10 +76,6 @@ pub struct KernelStack(pub usize);
 pub fn kstack_alloc() -> KernelStack {
     let kstack_id = KSTACK_ALLOCATOR.exclusive_access().alloc();
     let (kstack_bottom, kstack_top) = kernel_stack_position(kstack_id);
-    println!(
-        "[kernel] kstack alloc id={} [{:#x}, {:#x})",
-        kstack_id, kstack_bottom, kstack_top
-    );
     KERNEL_SPACE.exclusive_access().insert_framed_area(
         kstack_bottom.into(),
         kstack_top.into(),
@@ -91,7 +87,6 @@ pub fn kstack_alloc() -> KernelStack {
 impl Drop for KernelStack {
     fn drop(&mut self) {
         let (kernel_stack_bottom, _) = kernel_stack_position(self.0);
-        println!("[kernel] kstack drop id={}", self.0);
         let kernel_stack_bottom_va: VirtAddr = kernel_stack_bottom.into();
         KERNEL_SPACE
             .exclusive_access()

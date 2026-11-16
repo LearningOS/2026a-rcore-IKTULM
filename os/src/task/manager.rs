@@ -37,6 +37,15 @@ impl TaskManager {
     pub fn add_stop(&mut self, task: Arc<TaskControlBlock>) {
         self.stop_task = Some(task);
     }
+    fn clear_stop(&mut self, task: &Arc<TaskControlBlock>) {
+        if self
+            .stop_task
+            .as_ref()
+            .is_some_and(|stopped| Arc::as_ptr(stopped) == Arc::as_ptr(task))
+        {
+            self.stop_task = None;
+        }
+    }
 }
 
 lazy_static! {
@@ -60,4 +69,9 @@ pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
 /// Retain the task whose kernel stack is currently in use.
 pub fn add_stopping_task(task: Arc<TaskControlBlock>) {
     TASK_MANAGER.exclusive_access().add_stop(task);
+}
+
+/// Drop a retained stopped task once its zombie record is being collected.
+pub fn clear_stopping_task(task: &Arc<TaskControlBlock>) {
+    TASK_MANAGER.exclusive_access().clear_stop(task);
 }

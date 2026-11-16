@@ -7,8 +7,9 @@ use crate::{
         translated_ref, translated_refmut, translated_str, try_translated_refmut, MapPermission,
     },
     task::{
-        add_task, current_task, current_user_token, exit_current_and_run_next,
-        get_current_syscall_count, suspend_current_and_run_next, TaskControlBlock,
+        add_task, clear_stopping_task, current_task, current_user_token,
+        exit_current_and_run_next, get_current_syscall_count, suspend_current_and_run_next,
+        TaskControlBlock,
     },
     timer::get_time_us,
 };
@@ -91,6 +92,7 @@ pub fn sys_waitpid(pid: isize, exit_code_ptr: *mut i32) -> isize {
     });
     if let Some((idx, _)) = pair {
         let child = inner.children.remove(idx);
+        clear_stopping_task(&child);
         // confirm that child will be deallocated after being removed from children list
         assert_eq!(Arc::strong_count(&child), 1);
         let found_pid = child.getpid();
