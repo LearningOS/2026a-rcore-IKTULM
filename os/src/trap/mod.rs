@@ -69,6 +69,8 @@ pub fn trap_handler() -> ! {
             // jump to next instruction anyway
             let mut cx = current_trap_cx();
             cx.sepc += 4;
+            // Trace counts include the syscall currently being handled.
+            crate::task::increase_current_syscall_count(cx.x[17]);
             // get system call return value
             let result = syscall(cx.x[17], [cx.x[10], cx.x[11], cx.x[12], cx.x[13]]);
             // cx is changed during sys_exec, so we have to call it again

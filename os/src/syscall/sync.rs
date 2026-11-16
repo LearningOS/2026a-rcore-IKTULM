@@ -73,8 +73,7 @@ pub fn sys_mutex_lock(mutex_id: usize) -> isize {
     let mutex = Arc::clone(process_inner.mutex_list[mutex_id].as_ref().unwrap());
     drop(process_inner);
     drop(process);
-    mutex.lock();
-    0
+    mutex.lock()
 }
 /// mutex unlock syscall
 pub fn sys_mutex_unlock(mutex_id: usize) -> isize {
@@ -143,9 +142,14 @@ pub fn sys_semaphore_up(sem_id: usize) -> isize {
             .tid
     );
     let process = current_process();
+    let task = current_task().unwrap();
+    let tid = task.inner_exclusive_access().res.as_ref().unwrap().tid;
     let process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
     drop(process_inner);
+    process
+        .inner_exclusive_access()
+        .remove_resource_holder((1, sem_id), tid);
     sem.up();
     0
 }
@@ -163,10 +167,31 @@ pub fn sys_semaphore_down(sem_id: usize) -> isize {
             .tid
     );
     let process = current_process();
+    let task = current_task().unwrap();
+    let tid = task.inner_exclusive_access().res.as_ref().unwrap().tid;
+    let resource = (1, sem_id);
     let process_inner = process.inner_exclusive_access();
     let sem = Arc::clone(process_inner.semaphore_list[sem_id].as_ref().unwrap());
+    let should_block = sem.inner.exclusive_access().count <= 0;
     drop(process_inner);
+    if should_block {
+        let mut process_inner = process.inner_exclusive_access();
+        if process_inner.deadlock_detect
+            && process_inner.wait_would_deadlock(tid, resource)
+        {
+            return -0xdead;
+        }
+        if process_inner.waiting_for.len() <= tid {
+            process_inner.waiting_for.resize(tid + 1, None);
+        }
+        process_inner.waiting_for[tid] = Some(resource);
+    }
     sem.down();
+    let mut process_inner = process.inner_exclusive_access();
+    if process_inner.waiting_for.len() > tid {
+        process_inner.waiting_for[tid] = None;
+    }
+    process_inner.add_resource_holder(resource, tid);
     0
 }
 /// condvar create syscall
@@ -245,7 +270,8 @@ pub fn sys_condvar_wait(condvar_id: usize, mutex_id: usize) -> isize {
 /// enable deadlock detection syscall
 ///
 /// YOUR JOB: Implement deadlock detection, but might not all in this syscall
-pub fn sys_enable_deadlock_detect(_enabled: usize) -> isize {
-    trace!("kernel: sys_enable_deadlock_detect NOT IMPLEMENTED");
-    -1
+pub fn sys_enable_deadlock_detect(enabled: usize) -> isize {
+    let process = current_process();
+    process.inner_exclusive_access().deadlock_detect = enabled != 0;
+    0
 }

@@ -64,6 +64,8 @@ pub const SYSCALL_MUNMAP: usize = 215;
 pub const SYSCALL_MMAP: usize = 222;
 /// spawn syscall
 pub const SYSCALL_SPAWN: usize = 400;
+/// trace syscall
+pub const SYSCALL_TRACE: usize = 410;
 /*
 /// mail read syscall
 pub const SYSCALL_MAIL_READ: usize = 401;
@@ -149,6 +151,7 @@ pub fn syscall(syscall_id: usize, args: [usize; 4]) -> isize {
         SYSCALL_CONDVAR_SIGNAL => sys_condvar_signal(args[0]),
         SYSCALL_CONDVAR_WAIT => sys_condvar_wait(args[0], args[1]),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
+        SYSCALL_TRACE => sys_trace(args[0], args[1], args[2]),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }

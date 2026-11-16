@@ -143,11 +143,14 @@ impl PageTable {
     }
     /// get the physical address from the virtual address
     pub fn translate_va(&self, va: VirtAddr) -> Option<PhysAddr> {
-        self.find_pte(va.clone().floor()).map(|pte| {
+        self.find_pte(va.clone().floor()).and_then(|pte| {
+            if !pte.is_valid() {
+                return None;
+            }
             let aligned_pa: PhysAddr = pte.ppn().into();
             let offset = va.page_offset();
             let aligned_pa_usize: usize = aligned_pa.into();
-            (aligned_pa_usize + offset).into()
+            Some((aligned_pa_usize + offset).into())
         })
     }
     /// get the token from the page table
@@ -215,6 +218,32 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
         .translate_va(VirtAddr::from(va))
         .unwrap()
         .get_mut()
+}
+
+/// Translate a readable user pointer after checking page permissions.
+pub fn translated_ref_checked<T>(token: usize, ptr: *const T) -> Option<&'static T> {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let pte = page_table.translate(va.floor())?;
+    if !pte.is_valid() || !pte.readable() || !pte.flags().contains(PTEFlags::U) {
+        return None;
+    }
+    page_table
+        .translate_va(va)
+        .map(|pa| unsafe { &*(pa.0 as *const T) })
+}
+
+/// Translate a writable user pointer after checking page permissions.
+pub fn try_translated_refmut<T>(token: usize, ptr: *mut T) -> Option<&'static mut T> {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let pte = page_table.translate(va.floor())?;
+    if !pte.is_valid() || !pte.writable() || !pte.flags().contains(PTEFlags::U) {
+        return None;
+    }
+    page_table
+        .translate_va(va)
+        .map(|pa| unsafe { &mut *(pa.0 as *mut T) })
 }
 
 /// An abstraction over a buffer passed from user space to kernel space

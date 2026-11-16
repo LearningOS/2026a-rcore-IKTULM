@@ -1,5 +1,7 @@
-use crate::fs::{make_pipe, open_file, OpenFlags, Stat};
-use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
+use crate::fs::{make_pipe, open_file, OpenFlags, Stat, ROOT_INODE};
+use crate::mm::{
+    translated_byte_buffer, translated_refmut, translated_str, try_translated_refmut, UserBuffer,
+};
 use crate::task::{current_process, current_task, current_user_token};
 use alloc::sync::Arc;
 /// write syscall
@@ -123,29 +125,41 @@ pub fn sys_dup(fd: usize) -> isize {
     new_fd as isize
 }
 
-/// YOUR JOB: Implement fstat.
-pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
-        current_task().unwrap().process.upgrade().unwrap().getpid()
-    );
-    -1
+/// Return metadata for an open inode.
+pub fn sys_fstat(fd: usize, st: *mut Stat) -> isize {
+    let process = current_process();
+    let file = {
+        let inner = process.inner_exclusive_access();
+        if fd >= inner.fd_table.len() {
+            return -1;
+        }
+        let Some(file) = &inner.fd_table[fd] else {
+            return -1;
+        };
+        file.clone()
+    };
+    let Some(stat) = file.stat() else {
+        return -1;
+    };
+    let token = current_user_token();
+    let Some(slot) = try_translated_refmut(token, st) else {
+        return -1;
+    };
+    *slot = stat;
+    0
 }
 
-/// YOUR JOB: Implement linkat.
-pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
-        current_task().unwrap().process.upgrade().unwrap().getpid()
-    );
-    -1
+/// Create a hard link in the root directory.
+pub fn sys_linkat(old_name: *const u8, new_name: *const u8) -> isize {
+    let token = current_user_token();
+    let old_name = translated_str(token, old_name);
+    let new_name = translated_str(token, new_name);
+    ROOT_INODE.link_named(&old_name, &new_name)
 }
 
-/// YOUR JOB: Implement unlinkat.
-pub fn sys_unlinkat(_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
-        current_task().unwrap().process.upgrade().unwrap().getpid()
-    );
-    -1
+/// Remove a file from the root directory.
+pub fn sys_unlinkat(name: *const u8) -> isize {
+    let token = current_user_token();
+    let name = translated_str(token, name);
+    ROOT_INODE.unlink(&name)
 }

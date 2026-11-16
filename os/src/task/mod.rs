@@ -26,7 +26,7 @@ use crate::timer::remove_timer;
 use alloc::{sync::Arc, vec::Vec};
 use lazy_static::*;
 use manager::fetch_task;
-use process::ProcessControlBlock;
+pub use process::ProcessControlBlock;
 use switch::__switch;
 
 pub use context::TaskContext;
@@ -182,6 +182,27 @@ lazy_static! {
 ///Add init process to the manager
 pub fn add_initproc() {
     let _initproc = INITPROC.clone();
+}
+
+/// Record one syscall issued by the current task.
+pub fn increase_current_syscall_count(syscall_id: usize) {
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if syscall_id < inner.syscall_count.len() {
+        inner.syscall_count[syscall_id] += 1;
+    }
+}
+
+/// Query how many syscalls with `syscall_id` the current task issued.
+pub fn get_current_syscall_count(syscall_id: usize) -> usize {
+    let task = current_task().unwrap();
+    let count = task
+        .inner_exclusive_access()
+        .syscall_count
+        .get(syscall_id)
+        .copied()
+        .unwrap_or(0);
+    count
 }
 
 /// Check if the current task has any signal to handle

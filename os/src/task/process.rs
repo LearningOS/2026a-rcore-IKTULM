@@ -10,6 +10,7 @@ use crate::mm::{translated_refmut, MemorySet, KERNEL_SPACE};
 use crate::sync::{Condvar, Mutex, Semaphore, UPSafeCell};
 use crate::trap::{trap_handler, TrapContext};
 use alloc::string::String;
+use alloc::collections::BTreeMap;
 use alloc::sync::{Arc, Weak};
 use alloc::vec;
 use alloc::vec::Vec;
@@ -49,6 +50,12 @@ pub struct ProcessControlBlockInner {
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
     /// condvar list
     pub condvar_list: Vec<Option<Arc<Condvar>>>,
+    /// Whether resource deadlock detection is enabled.
+    pub deadlock_detect: bool,
+    /// Resource each task is currently blocked on.
+    pub waiting_for: Vec<Option<(u8, usize)>>,
+    /// Tasks holding each semaphore resource.
+    pub resource_holders: BTreeMap<(u8, usize), Vec<usize>>,
 }
 
 impl ProcessControlBlockInner {
@@ -119,6 +126,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    waiting_for: Vec::new(),
+                    resource_holders: BTreeMap::new(),
                 })
             },
         });
@@ -245,6 +255,9 @@ impl ProcessControlBlock {
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
                     condvar_list: Vec::new(),
+                    deadlock_detect: false,
+                    waiting_for: Vec::new(),
+                    resource_holders: BTreeMap::new(),
                 })
             },
         });
@@ -281,5 +294,70 @@ impl ProcessControlBlock {
     /// get pid
     pub fn getpid(&self) -> usize {
         self.pid.0
+    }
+}
+
+impl ProcessControlBlockInner {
+    /// Check whether blocking on `requested` would close a resource wait cycle.
+    pub fn wait_would_deadlock(&self, current: usize, requested: (u8, usize)) -> bool {
+        let Some(holders) = self.resource_holders.get(&requested) else {
+            return false;
+        };
+        holders
+            .iter()
+            .any(|holder| *holder == current)
+            || self.resource_is_fully_waiting(current, requested, &mut Vec::new())
+    }
+
+    fn resource_is_fully_waiting(
+        &self,
+        current: usize,
+        resource: (u8, usize),
+        visited: &mut Vec<usize>,
+    ) -> bool {
+        let Some(holders) = self.resource_holders.get(&resource) else {
+            return false;
+        };
+        if holders.is_empty() {
+            return false;
+        }
+        for holder in holders {
+            if *holder == current || visited.contains(holder) {
+                continue;
+            }
+            let Some(next) = self.waiting_for.get(*holder).and_then(|item| *item) else {
+                return false;
+            };
+            visited.push(*holder);
+            let dependent = self.resource_is_fully_waiting(current, next, visited);
+            visited.pop();
+            if !dependent {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Add one held instance of a resource to a task.
+    pub fn add_resource_holder(&mut self, resource: (u8, usize), tid: usize) {
+        self.resource_holders
+            .entry(resource)
+            .or_default()
+            .push(tid);
+    }
+
+    /// Release one instance of a resource held by a task.
+    pub fn remove_resource_holder(&mut self, resource: (u8, usize), tid: usize) {
+        let empty = if let Some(holders) = self.resource_holders.get_mut(&resource) {
+            if let Some(index) = holders.iter().position(|holder| *holder == tid) {
+                holders.remove(index);
+            }
+            holders.is_empty()
+        } else {
+            false
+        };
+        if empty {
+            self.resource_holders.remove(&resource);
+        }
     }
 }
